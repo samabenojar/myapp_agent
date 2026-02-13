@@ -26,12 +26,20 @@ def ingest_nasa(raw_path: Path = RAW_NASA_FILE, output_path: Path = INGESTED_FIL
         reader = csv.DictReader(infile)
         _validate_columns(reader.fieldnames)
         rows = list(reader)
+        for row_number, row in enumerate(rows, start=2):
+            missing_values = [
+                column for column in REQUIRED_RAW_COLUMNS if column not in row or row[column] is None
+            ]
+            if missing_values:
+                raise ValueError(
+                    f"Raw NASA row {row_number} is malformed and missing values for: {missing_values}"
+                )
 
     with output_path.open("w", newline="", encoding="utf-8") as outfile:
         writer = csv.DictWriter(outfile, fieldnames=REQUIRED_RAW_COLUMNS)
         writer.writeheader()
         for row in rows:
-            writer.writerow({column: row.get(column, "") for column in REQUIRED_RAW_COLUMNS})
+            writer.writerow({column: row[column] for column in REQUIRED_RAW_COLUMNS})
 
     return len(rows)
 

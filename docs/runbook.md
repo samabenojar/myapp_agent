@@ -26,12 +26,16 @@
 
 - Ingest NASA raw CSV:
   - `python -m src.ingest.nasa`
+  - Expected console output pattern: `Ingested <N> NASA rows into canonical/nasa_ingested.csv`
 - Normalize to canonical schema:
   - `python -m src.normalize.nasa_to_canonical`
+  - Expected console output pattern: `Wrote <N> canonical rows to canonical/samples.csv`
 - Derive fallback voltage sag metric:
   - `python -m src.derive.vbat_sag`
+  - Expected console output pattern: `Wrote <N> rows with vbat_sag to canonical/samples_with_vbat_sag.csv`
 - Plot voltage vs time:
   - `python -m src.visualize.voltage_time`
+  - Expected console output pattern: `Wrote plot to outputs/voltage_vs_time.png`
 
 ## Expected output files
 

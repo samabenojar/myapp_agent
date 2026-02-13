@@ -25,6 +25,15 @@ def _to_optional_int(value: str) -> int | None:
     return int(stripped)
 
 
+def _required_run_id(value: str | None) -> str:
+    if value is None:
+        raise ValueError("run_id is required")
+    run_id = value.strip()
+    if run_id == "":
+        raise ValueError("run_id must not be empty")
+    return run_id
+
+
 def normalize_nasa_to_canonical(
     raw_path: Path = RAW_NASA_FILE, output_path: Path = CANONICAL_FILE
 ) -> int:
@@ -43,7 +52,7 @@ def normalize_nasa_to_canonical(
         for row_number, row in enumerate(reader, start=2):
             try:
                 sample = CanonicalSample(
-                    run_id=str(row["run_id"]),
+                    run_id=_required_run_id(row["run_id"]),
                     timestamp=float(row["time_s"]),
                     voltage=float(row["voltage_v"]),
                     current=float(row["current_a"]),

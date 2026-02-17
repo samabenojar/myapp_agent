@@ -4,8 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from src.ingest.nasa import ingest_nasa
 from src.derive.vbat_sag import derive_vbat_sag
+from src.events.consumer import RawIngestedToValidatedConsumer
+from src.events.envelope import EventEnvelope
+from src.events.store import JsonlEventStore
+from src.ingest.nasa import ingest_nasa
 from src.normalize.nasa_to_canonical import normalize_nasa_to_canonical
 from src.schema.canonical import CANONICAL_COLUMNS
 
@@ -14,6 +17,31 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
     with path.open("r", newline="", encoding="utf-8") as infile:
         reader = csv.DictReader(infile)
         return list(reader)
+
+
+def _raw_ingested_event(event_id: str, row_count: int = 2) -> EventEnvelope:
+    return EventEnvelope(
+        event_id=event_id,
+        event_type="RawIngested",
+        event_version="1",
+        occurred_at="2026-02-17T00:00:00Z",
+        producer="tests",
+        idempotency_key=f"raw:{event_id}",
+        payload={
+            "raw_path": "data/nasa/nasa_samples.csv",
+            "output_path": "canonical/nasa_ingested.csv",
+            "required_columns": [
+                "run_id",
+                "time_s",
+                "voltage_v",
+                "current_a",
+                "temperature_c",
+                "cycle",
+            ],
+            "row_count": row_count,
+        },
+        metadata={"pipeline_step": "ingest"},
+    )
 
 
 def test_canonical_output_columns_and_quality(tmp_path: Path) -> None:
@@ -123,3 +151,50 @@ def test_pipeline_does_not_modify_raw_data_file(tmp_path: Path) -> None:
 
     after = raw_path.read_text(encoding="utf-8")
     assert before == after
+
+
+def test_consumer_ignores_duplicate_event_id(tmp_path: Path) -> None:
+    store = JsonlEventStore(tmp_path / "event_log.jsonl")
+    state_path = tmp_path / "projection_state.json"
+
+    duplicate_id = "event-duplicate-1"
+    store.append(_raw_ingested_event(duplicate_id, row_count=3))
+    store.append(_raw_ingested_event(duplicate_id, row_count=3))
+
+    consumer = RawIngestedToValidatedConsumer(store, state_path=state_path)
+    produced = consumer.consume()
+
+    raw_validated = [
+        stored.envelope for stored in store.read_all() if stored.envelope.event_type == "RawValidated"
+    ]
+    assert produced == 1
+    assert len(raw_validated) == 1
+
+
+def test_consumer_is_replay_safe_across_reruns(tmp_path: Path) -> None:
+    store = JsonlEventStore(tmp_path / "event_log.jsonl")
+    state_path = tmp_path / "projection_state.json"
+
+    consumer = RawIngestedToValidatedConsumer(store, state_path=state_path)
+
+    output_path = tmp_path / "nasa_ingested.csv"
+    ingest_nasa(
+        raw_path=Path("data/nasa/nasa_samples.csv"),
+        output_path=output_path,
+        event_store=store,
+        projection_consumer=consumer,
+    )
+
+    produced_on_rerun = consumer.consume()
+
+    raw_ingested = [
+        stored.envelope for stored in store.read_all() if stored.envelope.event_type == "RawIngested"
+    ]
+    raw_validated = [
+        stored.envelope for stored in store.read_all() if stored.envelope.event_type == "RawValidated"
+    ]
+
+    assert output_path.exists()
+    assert len(raw_ingested) == 1
+    assert len(raw_validated) == 1
+    assert produced_on_rerun == 0
